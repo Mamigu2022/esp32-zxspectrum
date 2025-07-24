@@ -7,7 +7,6 @@ using fs::File;
 #include "VideoPlayer/VideoPlayerState.h"
 
 class VideoSource;
-class IFiles;
 
 class VideoPlayerScreen : public Screen
 {
@@ -43,10 +42,8 @@ private:
   int volumeVisible = 0;
 public:
   VideoPlayerScreen(
-      Display &tft,
-      HDMIDisplay *hdmiDisplay,
-      AudioOutput *audioOutput,
-      IFiles *files) : Screen(tft, hdmiDisplay, audioOutput, files)
+      TFTDisplay &tft,
+      AudioOutput *audioOutput) : Screen(tft, audioOutput)
   {
   }
   void play(const char *aviFilename);

@@ -7,8 +7,6 @@
 #include "EmulatorScreen.h"
 #include "VideoFilePickerScreen.h"
 #include "GameFilePickerScreen.h"
-#include "AboutScreen.h"
-#include "TestScreen.h"
 
 static const std::vector<std::string> gameValidExtensions = {".z80", ".sna", ".tap", ".tzx"};
 static const std::vector<std::string> videoValidExtensions = {".avi"};
@@ -28,12 +26,14 @@ private:
 using MenuItemPtr = std::shared_ptr<MenuItem>;
 using MenuItemVector = std::vector<MenuItemPtr>;
 
-
+template <class Files_T>
 class MainMenuScreen : public PickerScreen<MenuItemPtr>
 {
+private:
+  Files_T *m_files;
+
 public:
-  MainMenuScreen(Display &tft, HDMIDisplay *hdmiDisplay, AudioOutput *audioOutput, IFiles *files) 
-  : PickerScreen("Main Menu", tft, hdmiDisplay, audioOutput, files)
+  MainMenuScreen(TFTDisplay &tft, AudioOutput *audioOutput, Files_T *files) : m_files(files), PickerScreen("Main Menu", tft, audioOutput)
   {
     // Main menu
     MenuItemVector menuItems = {
@@ -47,8 +47,6 @@ public:
                                    { this->showSnapshots(); }),
         std::make_shared<MenuItem>("Video Player", [&]()
                                    { this->showVideos(); }),
-        std::make_shared<MenuItem>("About", [&]()
-                                   { this->showAbout(); }),
 #ifdef ENABLE_MSC
         std::make_shared<MenuItem>("Mount SD Card", [&]()
                                   { this->mountSDCard(); }),
@@ -64,15 +62,15 @@ public:
 
   void run48K()
   {
-    EmulatorScreen *emulatorScreen = new EmulatorScreen(m_tft, m_hdmiDisplay, m_audioOutput, m_files);
-    emulatorScreen->run("", models_enum::SPECMDL_48K);
+    EmulatorScreen *emulatorScreen = new EmulatorScreen(m_tft, m_audioOutput);
+    emulatorScreen->run48K();
     // touchKeyboard->setToggleMode(true);
     m_navigationStack->push(emulatorScreen);
   }
   void run128K()
   {
-    EmulatorScreen *emulatorScreen = new EmulatorScreen(m_tft, m_hdmiDisplay, m_audioOutput, m_files);
-    emulatorScreen->run("", models_enum::SPECMDL_128K);
+    EmulatorScreen *emulatorScreen = new EmulatorScreen(m_tft, m_audioOutput);
+    emulatorScreen->run128K();
     // touchKeyboard->setToggleMode(true);
     m_navigationStack->push(emulatorScreen);
   }
@@ -90,9 +88,7 @@ public:
       ErrorScreen *errorScreen = new ErrorScreen(
           no_sd_card_error,
           m_tft,
-          m_hdmiDisplay,
-          m_audioOutput,
-          m_files);
+          m_audioOutput);
       m_navigationStack->push(errorScreen);
       return;
     }
@@ -103,13 +99,11 @@ public:
       ErrorScreen *errorScreen = new ErrorScreen(
         no_files_error,
         m_tft,
-        m_hdmiDisplay,
-        m_audioOutput,
-        m_files);
+        m_audioOutput);
       m_navigationStack->push(errorScreen);
       return;
     }
-    AlphabetPicker<FilterPickerScreen_T> *alphabetPicker = new AlphabetPicker<FilterPickerScreen_T>(title, m_files,  m_tft, m_hdmiDisplay, m_audioOutput, path, extensions);
+    AlphabetPicker<Files_T, FilterPickerScreen_T> *alphabetPicker = new AlphabetPicker<Files_T, FilterPickerScreen_T>(title, m_files,  m_tft, m_audioOutput, path, extensions);
     alphabetPicker->setItems(fileLetterCounts);
     m_navigationStack->push(alphabetPicker);
   }
@@ -150,11 +144,5 @@ public:
   void mountSDCard()
   {
     startMSC();
-  }
-
-  void showAbout()
-  {
-    AboutScreen *aboutScreen = new AboutScreen(m_tft, m_hdmiDisplay, m_audioOutput, m_files);
-    m_navigationStack->push(aboutScreen);
   }
 };

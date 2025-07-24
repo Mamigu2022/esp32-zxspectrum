@@ -3,13 +3,18 @@
 #include <vector>
 #include <string>
 #include "Screen.h"
-#include "../TFT/Display.h"
+#include "../TFT/TFTDisplay.h"
 #include "../Emulator/spectrum.h"
-#include "fonts/GillSans_25_vlw.h"
+#include "fonts/GillSans_30_vlw.h"
 #include "fonts/GillSans_15_vlw.h"
 #include "images/rainbow_image.h"
 
+class TFTDisplay;
 class ScrollingList;
+
+bool starts_with(const std::string& str, const std::string& prefix) {
+    return str.size() >= prefix.size() && str.compare(0, prefix.size(), prefix) == 0;
+}
 
 template <class ItemT>
 class PickerScreen : public Screen
@@ -21,18 +26,12 @@ private:
   int lastSearchPrefix = 0;
   int m_selectedItem = 0;
   int m_lastPageDrawn = -1;
-
-  bool starts_with(const std::string& str, const std::string& prefix) {
-      return str.size() >= prefix.size() && str.compare(0, prefix.size(), prefix) == 0;
-  }
 public:
   PickerScreen(
       std::string title,
-      Display &tft,
-      HDMIDisplay *hdmiDisplay,
-      AudioOutput *audioOutput,
-      IFiles *files
-  ) : title(title), Screen(tft, hdmiDisplay, audioOutput, files)
+      TFTDisplay &tft,
+      AudioOutput *audioOutput
+  ) : title(title), Screen(tft, audioOutput)
   {
   }
 
@@ -61,8 +60,9 @@ public:
     bool isHandled = false;
     switch (key)
     {
-    case JOYK_UP:
+    //case JOYK_UP:
     case SPECKEY_7:
+    vTaskDelay(200/ portTICK_PERIOD_MS);
       if (m_selectedItem > 0)
       {
         playKeyClick();
@@ -71,8 +71,9 @@ public:
       }
       isHandled = true;
       break;
-    case JOYK_DOWN:
     case SPECKEY_6:
+    //case JOYK_DOWN:
+    vTaskDelay(200/ portTICK_PERIOD_MS);
       if (m_selectedItem < m_items.size() - 1)
       {
         playKeyClick();
@@ -124,7 +125,7 @@ public:
   void updateDisplay()
   {
     m_tft.startWrite();
-    int linesPerPage = (m_tft.height() - 10 - 15)/25;
+    int linesPerPage = (m_tft.height() - 10 - 15)/30;
     int page = m_selectedItem / linesPerPage;
     if (page != m_lastPageDrawn)
     {
@@ -135,7 +136,7 @@ public:
     m_tft.setTextColor(TFT_WHITE, TFT_BLACK);
     m_tft.drawString((title + " - 5: Back, 6: Down, 7: Up, ENTER: Pick").c_str(), 0, 0);
     m_tft.drawFastHLine(0, 15, m_tft.width() - 1, TFT_WHITE);
-    m_tft.loadFont(GillSans_25_vlw);
+    m_tft.loadFont(GillSans_30_vlw);
     for (int i = 0; i < linesPerPage; i++)
     {
       int itemIndex = page * linesPerPage + i;
@@ -144,7 +145,7 @@ public:
         break;
       }
       m_tft.setTextColor(itemIndex == m_selectedItem ? TFT_GREEN : TFT_WHITE, TFT_BLACK);
-      m_tft.drawString(m_items[itemIndex]->getTitle().c_str(), 5, 10 + 15 + i * 25);
+      m_tft.drawString(m_items[itemIndex]->getTitle().c_str(), 20, 10 + 15 + i * 30);
     }
     // draw the spectrum flash
     m_tft.setWindow(m_tft.width() - rainbowImageWidth, m_tft.height() - rainbowImageHeight, m_tft.width() - 1, m_tft.height() - 1);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "USB.h"
+/*#include "USB.h"
 #include "USBHIDKeyboard.h"
 #include <vector>
 #include <string>
@@ -77,7 +77,7 @@ public:
     USB.begin();
   }
   
-  void updateKey(SpecKeys key, uint8_t state)
+  void updatekey(SpecKeys key, uint8_t state)
   {
     // map from the spectrum key to a hid_key
     int hid_key = 0;
@@ -108,4 +108,4 @@ public:
     m_tft.drawString("USB Keyboard", 20, 10);
     m_tft.endWrite();
   }
-};
+};*/

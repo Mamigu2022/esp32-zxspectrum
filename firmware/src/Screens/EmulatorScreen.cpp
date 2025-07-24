@@ -4,194 +4,454 @@
 #include "../Emulator/snaps.h"
 #include "../AudioOutput/AudioOutput.h"
 #include "../Files/Files.h"
-#include "ErrorScreen.h"
 #include "EmulatorScreen.h"
-#include "AlphabetPicker.h"
-#include "GameFilePickerScreen.h"
 #include "NavigationStack.h"
 #include "SaveSnapshotScreen.h"
-#include "EmulatorScreen/Renderer.h"
-#include "EmulatorScreen/Machine.h"
-#include "EmulatorScreen/GameLoader.h"
+#include "../TZX/ZXSpectrumTapeListener.h"
+#include "../TZX/DummyListener.h"
+#include "../TZX/tzx_cas.h"
+#include "utils.h"
 
-const std::vector<std::string> tap_extensions = {".tap", ".tzx"};
-const std::vector<std::string> no_sd_card_error = {"No SD Card", "Insert an SD Card", "to load games"};
-const std::vector<std::string> no_files_error = {"No games found", "on the SD Card", "add Z80 or SNA files"};
+const int screenWidth = TFT_WIDTH;
+const int screenHeight = TFT_HEIGHT;
+#ifdef SCALE_SCREEN
+// scale the screen by 1.5 times
+const int borderWidth = (screenWidth - 384) / 2;
+const int borderHeight = (screenHeight - 288) / 2;
+#else
+const int borderWidth = (screenWidth - 256) / 2;
+const int borderHeight = (screenHeight - 192) / 2;
+#endif
 
-void EmulatorScreen::triggerLoadTape()
+const uint16_t specpal565[16] = {
+    0x0000, 0x1B00, 0x00B8, 0x17B8, 0xE005, 0xF705, 0xE0BD, 0x18C6, 0x0000, 0x1F00, 0x00F8, 0x1FF8, 0xE007, 0xFF07, 0xE0FF, 0xFFFF};
+
+uint16_t flashTimer = 0;
+uint16_t lastBorderColor = -1;
+#ifdef SCALE_SCREEN
+uint16_t scaledBuffer[384 * 12];
+#endif
+
+void drawScreen(EmulatorScreen *emulatorScreen)
 {
-  if (isLoading) {
-    return;
-  }
-  machine->pause();
-  renderer->pause();
-  if (!m_files->isAvailable())
-  {
-    ErrorScreen *errorScreen = new ErrorScreen(
-        no_sd_card_error,
-        m_tft,
-        m_hdmiDisplay,
-        m_audioOutput,
-        m_files);
-    m_navigationStack->push(errorScreen);
-    return;
-  }
-  drawBusy();
-  FileLetterCountVector fileLetterCounts = m_files->getFileLetters("/", tap_extensions);
-  if (fileLetterCounts.size() == 0)
-  {
-    ErrorScreen *errorScreen = new ErrorScreen(
-        no_files_error,
-        m_tft,
-        m_hdmiDisplay,
-        m_audioOutput,
-        m_files);
-    m_navigationStack->push(errorScreen);
-    return;
-  }
-  AlphabetPicker<GameFilePickerScreen> *alphabetPicker = new AlphabetPicker<GameFilePickerScreen>("Select Tape File", m_files, m_tft, m_hdmiDisplay, m_audioOutput, "/", tap_extensions);
-  alphabetPicker->setItems(fileLetterCounts);
-  m_navigationStack->push(alphabetPicker);
-}
+  TFTDisplay &tft = emulatorScreen->m_tft;
+  ZXSpectrum *machine = emulatorScreen->machine;
 
-EmulatorScreen::EmulatorScreen(Display &tft, HDMIDisplay *hdmiDisplay, AudioOutput *audioOutput, IFiles *files)
-    : Screen(tft, hdmiDisplay, audioOutput, files)
-{
-  renderer = new Renderer(tft, audioOutput, hdmiDisplay);
-  machine = new Machine(renderer, audioOutput, [&]()
-                        {
-    Serial.println("ROM loading routine hit");
-    triggerLoadTape(); });
-  gameLoader = new GameLoader(machine, renderer, audioOutput);
-}
-
-void EmulatorScreen::run(std::string filename, models_enum model)
-{
-  m_tft.fillScreen(TFT_BLACK);
-  renderer->start();
-  auto bl = BusyLight();
-  machine->setup(model);
-  if (filename.size() > 0)
-  {
-    // check for tap or tpz files
-    std::string ext = filename.substr(filename.find_last_of(".") + 1);
-    std::transform(ext.begin(), ext.end(), ext.begin(),
-                   [](unsigned char c)
-                   { return std::tolower(c); });
-    if (ext == "tap" || ext == "tzx")
+  tft.startWrite();
+  if (!emulatorScreen->isLoading) {
+    // do the border
+    uint8_t borderColor = machine->hwopt.BorderColor & B00000111;
+    uint16_t tftColor = specpal565[borderColor];
+    // swap the byte order
+    tftColor = (tftColor >> 8) | (tftColor << 8);
+    if (tftColor != lastBorderColor || emulatorScreen->firstDraw)
     {
-      machine->startLoading();
-      gameLoader->loadTape(filename.c_str());
+      // do the border with some simple rects - no need to push pixels for a solid color
+      tft.fillRect(0, 0, screenWidth, borderHeight, tftColor);
+      tft.fillRect(0, screenHeight - borderHeight, screenWidth, borderHeight, tftColor);
+      tft.fillRect(0, borderHeight, borderWidth, screenHeight - borderHeight, tftColor);
+      tft.fillRect(screenWidth - borderWidth, borderHeight, borderWidth, screenHeight - borderHeight, tftColor);
+      lastBorderColor = tftColor;
+    }
+  }
+  // do the pixels
+  uint8_t *attrBase = emulatorScreen->currentScreenBuffer + 0x1800;
+  uint8_t *pixelBase = emulatorScreen->currentScreenBuffer;
+  uint8_t *attrBaseCopy = emulatorScreen->screenBuffer + 0x1800;
+  uint8_t *pixelBaseCopy = emulatorScreen->screenBuffer;
+  for (int attrY = 0; attrY < 192 / 8; attrY++)
+  {
+    bool dirty = false;
+    for (int attrX = 0; attrX < 256 / 8; attrX++)
+    {
+      // read the value of the attribute
+      uint8_t attr = *(attrBase + 32 * attrY + attrX);
+      uint8_t inkColor = attr & B00000111;
+      uint8_t paperColor = (attr & B00111000) >> 3;
+      // check for changes in the attribute
+      if ((attr & B10000000) != 0 && flashTimer < 16) {
+        // we are flashing we need to swap the ink and paper colors
+        uint8_t temp = inkColor;
+        inkColor = paperColor;
+        paperColor = temp;
+        // update the attribute with the new colors - this makes our dirty check work
+        attr = (attr & B11000000) | (inkColor & B00000111) | ((paperColor << 3) & B00111000);
+      }
+      if (attr != *(attrBaseCopy + 32 * attrY + attrX))
+      {
+        dirty = true;
+        *(attrBaseCopy + 32 * attrY + attrX) = attr;
+      }
+      if ((attr & B01000000) != 0)
+      {
+        inkColor = inkColor + 8;
+        paperColor = paperColor + 8;
+      }
+      uint16_t tftInkColor = specpal565[inkColor];
+      uint16_t tftPaperColor = specpal565[paperColor];
+      for (int y = 0; y < 8; y++)
+      {
+        // read the value of the pixels
+        int screenY = attrY * 8 + y;
+        int col = ((attrX * 8) & B11111000) >> 3;
+        int scan = (screenY & B11000000) + ((screenY & B111) << 3) + ((screenY & B111000) >> 3);
+        uint8_t row = *(pixelBase + 32 * scan + col);
+        uint8_t rowCopy = *(pixelBaseCopy + 32 * scan + col);
+        // check for changes in the pixel data
+        if (row != rowCopy)
+        {
+          dirty = true;
+          *(pixelBaseCopy + 32 * scan + col) = row;
+        }
+        uint16_t *pixelAddress = emulatorScreen->pixelBuffer + 256 * y + attrX * 8;
+        for (int x = 0; x <8; x++)
+        {
+          if (row & 128)
+          {
+            *pixelAddress = tftInkColor;
+          }
+          else
+          {
+            *pixelAddress = tftPaperColor;
+          }
+          pixelAddress++;
+          row = row << 1;
+        }
+      }
+    }
+    if (dirty || emulatorScreen->firstDraw)
+    {
+#ifdef SCALE_SCREEN
+      // scale the buffer by 1.5 times (repeat every other pixel horizontally and vertically)
+      int dstY = 0;
+      for (int y = 0; y < 8; y++)
+      {
+        int dstX = 0;
+        for (int x = 0; x < 256; x++)
+        {
+          scaledBuffer[dstY * 384 + dstX] = emulatorScreen->dmaBuffer1[y * 256 + x];
+          if (x % 2 == 0)
+          {
+            dstX++;
+            scaledBuffer[dstY * 384 + dstX] = emulatorScreen->dmaBuffer1[y * 256 + x];
+          }
+          dstX++;
+        }
+        if (y % 2 == 0) {
+          dstY++;
+          for(int x = 0; x < 384; x++) {
+            scaledBuffer[dstY * 384 + x] = scaledBuffer[(dstY - 1) * 384 + x];
+          }
+        }
+        dstY++;
+      }
+      tft.setWindow(borderWidth, borderHeight + attrY * 12, borderWidth + 383, borderHeight + attrY * 12 + 11);
+      tft.pushPixels(scaledBuffer, 384 * 12);
+#else
+      tft.setWindow(borderWidth, borderHeight + attrY * 8, borderWidth + 255, borderHeight + attrY * 8 + 7);
+      tft.pushPixels(emulatorScreen->pixelBuffer, 256 * 8);
+#endif
+    }
+  }
+  tft.endWrite();
+  emulatorScreen->drawReady = true;
+  emulatorScreen->firstDraw = false;
+  emulatorScreen->frameCount++;
+    flashTimer++;
+    if (flashTimer == 32)
+    {
+      flashTimer = 0;
+    }
+}
+
+void drawDisplay(void *pvParameters)
+{
+  EmulatorScreen *emulatorScreen = (EmulatorScreen *)pvParameters;
+  while (1)
+  {
+    if (!emulatorScreen->isRunning)
+    {
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      continue;
+    }
+    if(xSemaphoreTake(emulatorScreen->m_displaySemaphore, portMAX_DELAY)) {
+      drawScreen(emulatorScreen);
+    }
+    if (emulatorScreen->isRunning && digitalRead(0) == LOW)
+    {
+      emulatorScreen->pause();
+      emulatorScreen->showSaveSnapshotScreen();
+    }
+  }
+}
+
+void z80Runner(void *pvParameter)
+{
+  EmulatorScreen *emulatorScreen = (EmulatorScreen *)pvParameter;
+  unsigned long lastTime = millis();
+  while (1)
+  {
+    if (emulatorScreen->isRunning)
+    {
+      emulatorScreen->cycleCount += emulatorScreen->machine->runForFrame(emulatorScreen->m_audioOutput, emulatorScreen->audioFile);
+      // make a copy of the current screen
+      if (emulatorScreen->drawReady) {
+        emulatorScreen->drawReady = false;
+        memcpy(emulatorScreen->currentScreenBuffer, emulatorScreen->machine->mem.currentScreen, 6912);
+        xSemaphoreGive(emulatorScreen->m_displaySemaphore);
+      }
+      // uint32_t evt = 0;
+      // xQueueSend(emulatorScreen->frameRenderTimerQueue, &evt, 0);
+      // drawDisplay(emulatorScreen);
+      // log out some stats
+      unsigned long currentTime = millis();
+      unsigned long elapsed = currentTime - lastTime;
+      if (elapsed > 1000)
+      {
+        lastTime = currentTime;
+        float cycles = emulatorScreen->cycleCount / (elapsed * 1000.0);
+        float fps = emulatorScreen->frameCount / (elapsed / 1000.0);
+        Serial.printf("Executed at %.3FMHz cycles, frame rate=%.2f\n", cycles, fps);
+        emulatorScreen->frameCount = 0;
+        emulatorScreen->cycleCount = 0;
+      }
     }
     else
     {
-      // generic loading of z80 and sna files
-      Load(machine->getMachine(), filename.c_str());
+      vTaskDelay(100 / portTICK_PERIOD_MS);
     }
-  }
-  // audioFile = fopen("/fs/audio.raw", "wb");
-  machine->start(audioFile);
-}
-
-void EmulatorScreen::pause()
-{
-  renderer->pause();
-  machine->pause();
-}
-
-void EmulatorScreen::resume()
-{
-  renderer->resume();
-  machine->resume();
-}
-
-void EmulatorScreen::updateKey(SpecKeys key, uint8_t state)
-{
-  // TODO audio capture
-  // if (key == SPECKEY_0)
-  // {
-  //   if (audioFile)
-  //   {
-  //     machine->pause();
-  //     vTaskDelay(1000 / portTICK_PERIOD_MS);
-  //     fclose(audioFile);
-  //     audioFile = NULL;
-  //     Serial.printf("Audio file closed\n");
-  //   }
-  // }
-  if (!renderer->isShowingTimeTravel)
-  {
-    machine->updateKey(key, state);
   }
 }
 
-void EmulatorScreen::pressKey(SpecKeys key)
+EmulatorScreen::EmulatorScreen(TFTDisplay &tft, AudioOutput *audioOutput) : Screen(tft, audioOutput)
 {
-  if (key == SPECKEY_MENU)
+  pixelBuffer = (uint16_t *)malloc(screenWidth * 8 * sizeof(uint16_t));
+  screenBuffer = (uint8_t *)malloc(6912);
+  if (screenBuffer == NULL)
   {
-    if (renderer->isShowingMenu) {
-      renderer->isShowingMenu = false;
-      renderer->forceRedraw();
-      machine->resume();
-    } else {
-      machine->pause();
-      renderer->isShowingMenu = true;
-    }
+    Serial.println("Failed to allocate screen buffer");
   }
-  if (renderer->isShowingTimeTravel)
+  memset(screenBuffer, 0, 6912);
+  currentScreenBuffer = (uint8_t *)malloc(6912);
+  if (currentScreenBuffer == NULL)
   {
-    if (key == SPECKEY_ENTER)
-    {
-      machine->stopTimeTravel();
-      renderer->isShowingTimeTravel = false;
-      renderer->forceRedraw();
-      machine->resume();
-    }
-    else
-    {
-      if (key == SPECKEY_5) {
-        machine->stepBack();
-        renderer->forceRedraw();
-      }
-      if (key == SPECKEY_8) {
-        machine->stepForward();
-        renderer->forceRedraw();
-      }
-    }
-  } else if (renderer->isShowingMenu) 
-  {
-    if (key == SPECKEY_1) {
-      renderer->isShowingMenu = false;
-      renderer->isShowingTimeTravel = true;
-      machine->startTimeTravel();
-      renderer->forceRedraw();
-    }
-    else if (key == SPECKEY_2) {
-      renderer->isShowingMenu = false;
-      // show the save snapshot UI
-      m_navigationStack->push(new SaveSnapshotScreen(m_tft, m_hdmiDisplay, m_audioOutput, machine->getMachine(), m_files));
-    } else if (key == SPECKEY_SPACE || key == SPECKEY_ENTER) {
-      renderer->isShowingMenu = false;
-      machine->resume();
-      renderer->forceRedraw();
-    } else if (key == SPECKEY_5) {
-    m_audioOutput->volumeDown();
-      renderer->forceRedraw();
-    } else if (key == SPECKEY_8) {
-      m_audioOutput->volumeUp();
-      renderer->forceRedraw();
-    }
+    Serial.println("Failed to allocate current screen buffer");
   }
+  memset(currentScreenBuffer, 0, 6912);
+  m_displaySemaphore = xSemaphoreCreateBinary();
+
+  pinMode(0, INPUT_PULLUP);
 }
 
 void EmulatorScreen::loadTape(std::string filename)
 {
+  ScopeGuard guard([&]() {
+    isLoading = false;
+    if (m_audioOutput) m_audioOutput->resume();
+  });
+  if (m_audioOutput) m_audioOutput->pause();
+  uint64_t startTime = get_usecs();
   isLoading = true;
-  renderer->resume();
-  renderer->setNeedsRedraw();
-  gameLoader->loadTape(filename);
-  renderer->setIsLoading(false);
-  renderer->setNeedsRedraw();
-  machine->resume();
-  isLoading = false;
+  Serial.printf("Loading tape %s\n", filename.c_str());
+  for(int i = 0; i < 200; i++) {
+      machine->runForFrame(nullptr, nullptr);
+  }
+  Serial.printf("Pressing enter\n");
+  // press the enter key to trigger tape loading
+  machine->updatekey(SPECKEY_ENTER, 1);
+  for(int i = 0; i < 10; i++) {
+      machine->runForFrame(nullptr, nullptr);
+  }
+  machine->updatekey(SPECKEY_ENTER, 0);
+  for(int i = 0; i < 10; i++) {
+      machine->runForFrame(nullptr, nullptr);
+  }
+  Serial.printf("Loading tape file\n");
+  FILE *fp = fopen(filename.c_str(), "rb");
+  if (fp == NULL)
+  {
+    Serial.println("Error: Could not open file.");
+    std::cout << "Error: Could not open file." << std::endl;
+    return;
+  }
+  fseek(fp, 0, SEEK_END);
+  long file_size = ftell(fp);
+  fseek(fp, 0, SEEK_SET);
+  Serial.printf("File size %d\n", file_size);
+  uint8_t *tzx_data = (uint8_t*)ps_malloc(file_size);
+  if (!tzx_data)
+  {
+    Serial.println("Error: Could not allocate memory.");
+    return;
+  }
+  fread(tzx_data, 1, file_size, fp);
+  fclose(fp);
+  // load the tape
+  TzxCas tzxCas;
+  DummyListener *dummyListener = new DummyListener();
+  dummyListener->start();
+  if (filename.find(".tap") != std::string::npos || filename.find(".TAP") != std::string::npos) {
+    tzxCas.load_tap(dummyListener, tzx_data, file_size);
+  } else {
+    tzxCas.load_tzx(dummyListener, tzx_data, file_size);
+  }
+  dummyListener->finish();
+  uint64_t totalTicks = dummyListener->getTotalTicks();
+  Serial.printf("Total cycles: %lld\n", dummyListener->getTotalTicks());
+  delete dummyListener;
+  int count = 0;
+  uint16_t drawnBorderColors[240] = {0x18C6};
+  uint16_t borderColors[240] = {0x18C6};
+  ZXSpectrumTapeListener *listener = new ZXSpectrumTapeListener(machine, [&](uint64_t progress)
+      {
+        // approximate the border position - not very accutare but good enough
+        int borderPos = count % 240;
+        // get the border color
+        borderColors[borderPos] = specpal565[machine->hwopt.BorderColor & B00000111];
+        count++;
+        if (count % 4000 == 0) {
+          for(int borderPos = 8; borderPos < 240; borderPos++) {
+            if (drawnBorderColors[borderPos] != borderColors[borderPos]) {
+              drawnBorderColors[borderPos] = borderColors[borderPos];
+              // draw the border
+              if (borderPos < borderHeight || borderPos >= screenHeight - borderHeight) {
+                m_tft.drawFastHLine(0, borderPos, screenWidth, borderColors[borderPos]);
+              } else {
+                m_tft.drawFastHLine(0, borderPos, borderWidth, borderColors[borderPos]);
+                m_tft.drawFastHLine(screenWidth - borderWidth, borderPos, borderWidth, borderColors[borderPos]);
+              }
+            }
+          }
+          float machineTime = (float) listener->getTotalTicks() / 3500000.0f;
+          float wallTime = (float) (get_usecs() - startTime) / 1000000.0f;
+          Serial.printf("Total execution time: %fs\n", (float) listener->getTotalExecutionTime() / 1000000.0f);
+          Serial.printf("Total machine time: %f\n", machineTime);
+          Serial.printf("Wall Clock time: %fs\n", wallTime);
+          Serial.printf("Speed Up: %f\n",  machineTime/wallTime);
+          Serial.printf("Progress: %lld\n", progress * 100 / totalTicks);
+          if (drawReady) {
+            drawReady = false;
+            memcpy(currentScreenBuffer, machine->mem.currentScreen, 6912);
+            drawScreen(this);
+            // draw a progreess bar
+            int position = progress * screenWidth / totalTicks;
+            m_tft.fillRect(position, 0, screenWidth - position, 8, TFT_BLACK);
+            m_tft.fillRect(0, 0, position, 8, TFT_GREEN);
+            vTaskDelay(1);
+          }
+        }
+      });
+  listener->start();
+  if (filename.find(".tap") != std::string::npos || filename.find(".TAP") != std::string::npos) {
+      Serial.printf("Loading tap file\n");
+      tzxCas.load_tap(listener, tzx_data, file_size);
+  } else {
+      Serial.printf("Loading tzx file\n");
+      tzxCas.load_tzx(listener, tzx_data, file_size);
+  }
+  Serial.printf("Tape loaded\n");
+  listener->finish();
+  Serial.printf("*********************");
+  Serial.printf("Total execution time: %lld\n", listener->getTotalExecutionTime());
+  Serial.printf("Total cycles: %lld\n", listener->getTotalTicks());
+  Serial.printf("*********************");
+  free(tzx_data);
+  delete listener;
+}
+
+void EmulatorScreen::run(std::string filename)
+{
+  // audioFile = fopen("/fs/audio.raw", "wb");
+  firstDraw = true;
+  auto bl = BusyLight();
+  memset(pixelBuffer, 0, screenWidth * 8 * sizeof(uint16_t));
+  memset(screenBuffer, 0, 6192);
+  machine = new ZXSpectrum();
+  machine->reset();
+  // check for tap or tpz files
+  std::string ext = filename.substr(filename.find_last_of(".") + 1);
+  std::transform(ext.begin(), ext.end(), ext.begin(),
+                 [](unsigned char c)
+                 { return std::tolower(c); });
+  if (ext == "tap" || ext == "tzx")
+  {
+    machine->init_spectrum(SPECMDL_128K);
+    machine->reset_spectrum(machine->z80Regs);
+    loadTape(filename.c_str());
+  } else {
+    // generic loading of z80 and sna files
+    machine->init_spectrum(SPECMDL_48K);
+    machine->reset_spectrum(machine->z80Regs);
+    Load(machine, filename.c_str());
+  }
+  // tasks to do the work
+  Serial.println("Starting tasks\n");
+  m_tft.fillScreen(TFT_BLACK);
+  isRunning = true;
+  xTaskCreatePinnedToCore(drawDisplay, "drawDisplay", 8192, this, 1, NULL, 1);
+  xTaskCreatePinnedToCore(z80Runner, "z80Runner", 8192, this, 5, NULL, 0);
+}
+
+void EmulatorScreen::run48K() {
+  memset(pixelBuffer, 0, screenWidth * 8 * sizeof(uint16_t));
+  memset(screenBuffer, 0, 6192);
+  machine = new ZXSpectrum();
+  machine->reset();
+  machine->init_spectrum(SPECMDL_48K);
+  machine->reset_spectrum(machine->z80Regs);
+  m_tft.fillScreen(TFT_WHITE);
+  firstDraw = true;
+  isRunning = true;
+  // tasks to do the work
+  xTaskCreatePinnedToCore(drawDisplay, "drawDisplay", 8192, this, 1, NULL, 1);
+  xTaskCreatePinnedToCore(z80Runner, "z80Runner", 8192, this, 5, NULL, 0);
+}
+
+void EmulatorScreen::run128K() {
+  memset(pixelBuffer, 0, screenWidth * 8 * sizeof(uint16_t));
+  memset(screenBuffer, 0, 6192);
+  machine = new ZXSpectrum();
+  machine->reset();
+  machine->init_spectrum(SPECMDL_128K);
+  machine->reset_spectrum(machine->z80Regs);
+  m_tft.fillScreen(TFT_WHITE);
+  firstDraw = true;
+  isRunning = true;
+  // tasks to do the work
+  xTaskCreatePinnedToCore(drawDisplay, "drawDisplay", 8192, this, 1, NULL, 1);
+  xTaskCreatePinnedToCore(z80Runner, "z80Runner", 8192, this, 5, NULL, 0);
+}
+
+void EmulatorScreen::pause()
+{
+  isRunning = false;
+}
+
+void EmulatorScreen::resume()
+{
+  // trigger a complete screen redraw
+  firstDraw = true;
+  // start running again
+  isRunning = true;
+}
+
+void EmulatorScreen::updatekey(SpecKeys key, uint8_t state)
+{
+  if (key == SPECKEY_0)
+  {
+    if (audioFile) {
+      isRunning = false;
+      vTaskDelay(1000 / portTICK_PERIOD_MS);
+      fclose(audioFile);
+      audioFile = NULL;
+      Serial.printf("Audio file closed\n");
+    }
+  }
+  if (isRunning) {
+    machine->updatekey(key, state);
+  }
+}
+
+void EmulatorScreen::showSaveSnapshotScreen() {
+  m_navigationStack->push(new SaveSnapshotScreen(m_tft, m_audioOutput, machine));
 }

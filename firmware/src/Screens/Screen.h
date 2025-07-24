@@ -7,30 +7,23 @@
 #include "sounds/error.h"
 #include "sounds/click.h"
 #include "images/busy.h"
-#include "../TFT/Display.h"
-#include "../TFT/HDMIDisplay.h"
+#include "../TFT/TFTDisplay.h"
 
-class Display;
+class TFTDisplay;
 class AudioOutput;
 class NavigationStack;
-class IFiles;
 
 const uint8_t click[] = { 50, 50, 50, 0 };
-
-class IFiles;
 
 class Screen {
   protected:
     NavigationStack *m_navigationStack = nullptr;
-    Display &m_tft;
-    HDMIDisplay *m_hdmiDisplay = nullptr;
+    TFTDisplay &m_tft;
     AudioOutput *m_audioOutput;
-    IFiles *m_files;
   public:
-  Screen(Display &tft, HDMIDisplay *hdmiDisplay, AudioOutput *audioOutput, IFiles *files) 
-  : m_tft(tft), m_hdmiDisplay(hdmiDisplay), m_audioOutput(audioOutput), m_files(files) {}
+  Screen(TFTDisplay &tft, AudioOutput *audioOutput) : m_tft(tft), m_audioOutput(audioOutput) {}
   // input
-  virtual void updateKey(SpecKeys key, uint8_t state) {};
+  virtual void updatekey(SpecKeys key, uint8_t state) {};
   virtual void pressKey(SpecKeys key) {};
   void playKeyClick() {
     if (m_audioOutput) {

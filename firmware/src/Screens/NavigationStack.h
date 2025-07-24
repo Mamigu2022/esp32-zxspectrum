@@ -2,18 +2,13 @@
 
 #include <vector>
 #include "Screen.h"
-#include "../TFT/Display.h"
-#include "../TFT/HDMIDisplay.h"
-
 
 class NavigationStack
 {
   private:
-    Display *m_tft;
-    HDMIDisplay *m_hdmiDisplay;
-  public:
     std::vector<Screen *> stack;
-    NavigationStack(Display *tft, HDMIDisplay *hdmiDisplay) : m_tft(tft), m_hdmiDisplay(hdmiDisplay) {}
+  public:
+    NavigationStack() {}
     ~NavigationStack() {}
     Screen *getTop() {
       if (stack.size() > 0) {
@@ -46,19 +41,13 @@ class NavigationStack
         }
       }
     }
-    void updateKey(SpecKeys key, uint8_t state) {
+    void updatekey(SpecKeys key, uint8_t state) {
       Screen *top = getTop();
       if (top) {
-        top->updateKey(key, state);
+        top->updatekey(key, state);
       }
     };
     void pressKey(SpecKeys key) {
-      #ifdef ENABLE_FRAMEBUFFER
-      if (key == SPECKEY_MENU) {
-        m_tft->saveScreenshot();
-        return;
-      }
-      #endif
       Screen *top = getTop();
       if (top) {
         top->pressKey(key);

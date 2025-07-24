@@ -25,48 +25,47 @@
 #include "Emulator/snaps.h"
 #include "Emulator/spectrum.h"
 #include "Files/Files.h"
-#include "Files/Settings.h"
 #include "Screens/NavigationStack.h"
 #include "Screens/MainMenuScreen.h"
+#include "Screens/USBKeyboardScreen.h"
 #include "Input/SerialKeyboard.h"
+#include "Input/USBKeyboard.h"
 #include "Input/Nunchuck.h"
-#include "Input/AdafruitSeeSaw.h"
-#include "Input/TDeckKeyboard.h"
 #include "TFT/TFTDisplay.h"
 #include "TFT/ST7789.h"
 #include "TFT/ILI9341.h"
-#include "TFT/HDMIDisplay.h"
+#include <usb/usb_host.h>
+#include <class/hid/hid.h>
+#include <rom/usb/usb_common.h>
+//#include "Screen/USBKeyboardScreen.h"
+
+
+//MyEspUsbHost usbHost;
+//#endif
 #ifdef TOUCH_KEYBOARD
 #include "Input/TouchKeyboard.h"
 #endif
 #ifdef TOUCH_KEYBOARD_V2
 #include "Input/TouchKeyboardV2.h"
 #endif
-#include "SerialInterface/PacketHandler.h"
-#include "SerialInterface/SerialTransport.h"
-#include "SerialInterface/Messages/GetVersion.h"
-#include "SerialInterface/Messages/ListFolder.h"
-#include "SerialInterface/Messages/WriteFile.h"
-#include "SerialInterface/Messages/ReadFile.h"
-#include "SerialInterface/Messages/DeleteFile.h"
-#include "SerialInterface/Messages/MakeDirectory.h"
-#include "SerialInterface/Messages/RenameFile.h"
 
-void SerialInterfaceTask(void *arg) {
-  PacketHandler *packetHandler = (PacketHandler *) arg;
-  while(true) {
-    packetHandler->loop();
-    vTaskDelay(1);
-  }
-}
+const char *MOUNT_POINT = "/fs";
 
 void setup(void)
 {
-  #ifdef BOARD_POWERON
-  pinMode(BOARD_POWERON, OUTPUT);
-  digitalWrite(BOARD_POWERON, HIGH);
-  #endif
-  Serial.begin(115200);
+
+    // Files
+#ifdef USE_SDCARD
+//#ifdef USE_SDIO
+  //SDCard *fileSystem = new SDCard(MOUNT_POINT, SD_CARD_CLK, SD_CARD_CMD, SD_CARD_D0, SD_CARD_D1, SD_CARD_D2, SD_CARD_D3);
+  //Files<SDCard> *files = new Files<SDCard>(fileSystem);
+  //setupUSB(fileSystem);
+//#else
+  SDCard *fileSystem = new SDCard(MOUNT_POINT, SD_CARD_MISO, SD_CARD_MOSI, SD_CARD_CLK, SD_CARD_CS);
+  Files<SDCard> *files = new Files<SDCard>(fileSystem);
+  //setupUSB(fileSystem);
+//#endif
+  // Serial.begin(115200);
   // for(int i = 0; i < 5; i++) {
   //   BusyLight bl;
   //   vTaskDelay(pdMS_TO_TICKS(1000));
@@ -81,66 +80,14 @@ void setup(void)
   vTaskDelay(100);
   #endif
   Serial.println("Starting up");
-  #ifdef TFT_MOSI
-  Serial.println("Starting up SPI");
-  // Initialize SPI
-  spi_bus_config_t buscfg = {
-      .mosi_io_num = TFT_MOSI,
-      .miso_io_num = TFT_MISO,
-      .sclk_io_num = TFT_SCLK,
-      .quadwp_io_num = -1,
-      .quadhd_io_num = -1,
-      .data4_io_num = -1,
-      .data5_io_num = -1,
-      .data6_io_num = -1,
-      .data7_io_num = -1,
-      .max_transfer_sz = 65535,
-      .flags = SPICOMMON_BUSFLAG_MASTER,
-      //.isr_cpu_id = ESP_INTR_CPU_AFFINITY_1,
-      .intr_flags = 0,
-  };
-  ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
-  Serial.println("SPI initialized");
-  #endif
-  // Files
-  SDCard *sdFileSystem = nullptr;
-  #ifdef USE_SDCARD
-    #ifdef USE_SDIO
-      sdFileSystem = new SDCard(SDCard::DEFAULT_MOUNT_POINT, SD_CARD_CLK, SD_CARD_CMD, SD_CARD_D0, SD_CARD_D1, SD_CARD_D2, SD_CARD_D3);
-      // TODO setupUSB(fileSystem);
-    #else
-      #ifdef SD_CARD_MISO
-        sdFileSystem = new SDCard(SDCard::DEFAULT_MOUNT_POINT, SD_CARD_MISO, SD_CARD_MOSI, SD_CARD_CLK, SD_CARD_CS);
-      #else
-        // SD Card shares the SPI bus with the TFT
-        sdFileSystem = new SDCard(SDCard::DEFAULT_MOUNT_POINT, SD_CARD_CS);
-      #endif
-    #endif
-  #endif
-  FilesImplementation<SDCard> *sdFiles = new FilesImplementation<SDCard>(sdFileSystem);
-  FlashLittleFS *spiffsFileSystem = new FlashLittleFS(FlashLittleFS::DEFAULT_MOUNT_POINT);
-  FilesImplementation<FlashLittleFS> *spiffsFiles = new FilesImplementation<FlashLittleFS>(spiffsFileSystem);
-
-  IFiles *files = new UnifiedStorage(spiffsFiles, sdFiles);
-  
-  ISettings *settings = new Settings(spiffsFiles);
-
-  #ifdef TFT_ST7789
-  Display *tft = new ST7789(TFT_CS, TFT_DC, TFT_RST, TFT_BL, TFT_WIDTH, TFT_HEIGHT);
-  #endif
-  #ifdef TFT_ILI9341
-  Display *tft = new ILI9341(TFT_CS, TFT_DC, TFT_RST, TFT_BL, TFT_WIDTH, TFT_HEIGHT);
-  #endif
-  HDMIDisplay *hdmiDisplay = nullptr; // new HDMIDisplay(GPIO_NUM_7);
   // navigation stack
-  NavigationStack *navigationStack = new NavigationStack(tft, hdmiDisplay);
+  NavigationStack *navigationStack = new NavigationStack();
   // Audio output
-  AudioOutput *audioOutput = nullptr;
 #ifdef USE_DAC_AUDIO
-  audioOutput = new DACOutput(I2S_NUM_0, settings);
+  AudioOutput *audioOutput = new DACOutput(I2S_NUM_0);
 #endif
 #ifdef BUZZER_GPIO_NUM
-  audioOutput = new BuzzerOutput(BUZZER_GPIO_NUM, settings);
+  AudioOutput *audioOutput = new BuzzerOutput(BUZZER_GPIO_NUM);
 #endif
 #ifdef PDM_GPIO_NUM
   // i2s speaker pins
@@ -149,7 +96,7 @@ void setup(void)
       .ws_io_num = GPIO_NUM_0,
       .data_out_num = BUZZER_GPIO_NUM,
       .data_in_num = I2S_PIN_NO_CHANGE};
-  audioOutput = new PDMOutput(I2S_NUM_0, i2s_speaker_pins, settings);
+  AudioOutput *audioOutput = new PDMOutput(I2S_NUM_0, i2s_speaker_pins);
 #endif
 #ifdef I2S_SPEAKER_SERIAL_CLOCK
 #ifdef SPK_MODE
@@ -162,14 +109,14 @@ void setup(void)
       .ws_io_num = I2S_SPEAKER_LEFT_RIGHT_CLOCK,
       .data_out_num = I2S_SPEAKER_SERIAL_DATA,
       .data_in_num = I2S_PIN_NO_CHANGE};
-  audioOutput = new I2SOutput(I2S_NUM_1, i2s_speaker_pins, settings);
+  AudioOutput *audioOutput = new I2SOutput(I2S_NUM_1, i2s_speaker_pins);
 #endif
 #ifdef TOUCH_KEYBOARD
   TouchKeyboard *touchKeyboard = new TouchKeyboard(
       [&](SpecKeys key, bool down)
       {
         {
-          navigationStack->updateKey(key, down);
+          navigationStack->updatekey(key, down);
         }
       });
   touchKeyboard->calibrate();
@@ -178,93 +125,62 @@ void setup(void)
 #ifdef TOUCH_KEYBOARD_V2
   TouchKeyboardV2 *touchKeyboard = new TouchKeyboardV2(
       [&](SpecKeys key, bool down) 
-      { navigationStack->updateKey(key, down); },
+      { navigationStack->updatekey(key, down); },
       [&](SpecKeys key)
       { navigationStack->pressKey(key); });
   touchKeyboard->start();
 #endif
-#ifdef LILYGO_T_KEYBOARD
-  TDeckKeyboard *tDeckKeyboard = new TDeckKeyboard([&](SpecKeys key, bool down)
-                                                { navigationStack->updateKey(key, down); },
-                                                [&](SpecKeys key)
-                                                { navigationStack->pressKey(key); });
-  tDeckKeyboard->start();
+  audioOutput->start(15625);
+  #ifdef TFT_ST7789
+  TFTDisplay *tft = new ST7789(TFT_MOSI, TFT_SCLK, TFT_CS, TFT_DC, TFT_RST, TFT_BL, TFT_WIDTH, TFT_HEIGHT);
+  #endif
+  #ifdef TFT_ILI9341
+  TFTDisplay *tft = new ILI9341(TFT_MOSI, TFT_SCLK, TFT_CS, TFT_DC, TFT_RST, TFT_BL, TFT_WIDTH, TFT_HEIGHT);
+  #endif
+#else
+  Flash *fileSystem = new Flash(MOUNT_POINT);
+  Files<Flash> *files = new Files<Flash>(fileSystem);
 #endif
-  if (audioOutput) {
-    audioOutput->start(15625);
-  }
   // create the directory structure
-  if (!files->createDirectory("/snapshots"))
-  {
-    Serial.println("Failed to create /snapshots directory");
-  }
-  MainMenuScreen menuPicker(*tft, hdmiDisplay, audioOutput, files);
+  files->createDirectory("/snapshots");
+  MainMenuScreen menuPicker(*tft, audioOutput, files);
   navigationStack->push(&menuPicker);
   // start off the keyboard and feed keys into the active scene
-  // SerialKeyboard *keyboard = new SerialKeyboard([&](SpecKeys key, bool down)
-  //                                               { navigationStack->updateKey(key, down); if (down) { navigationStack->pressKey(key); } });
+  
 
+  /*SerialKeyboard *keyboard = new SerialKeyboard([&](SpecKeys key, bool down)
+                                                { navigationStack->updatekey(key, down);
+                                                 if (down) { navigationStack->pressKey(key); } });
+*/
 // start up the nunchuk controller and feed events into the active screen
+
+
+#ifdef TECLADO_USB
+USBKeyboard *usbkeyboard = new USBKeyboard([&](SpecKeys key, bool down)
+                                    { navigationStack->updatekey(key, down);
+                                    if (down) { navigationStack->pressKey(key); } },
+                                    [&](SpecKeys key)
+                                    { navigationStack->pressKey(key); });
+ #endif                                
+
 #ifdef NUNCHUK_CLOCK
-   Nunchuck *nunchuck = new Nunchuck([&](SpecKeys key, bool down)
-                                    { navigationStack->updateKey(key, down); },
+  Nunchuck *nunchuck = new Nunchuck([&](SpecKeys key, bool down)
+                                    { navigationStack->updatekey(key, down); },
                                     [&](SpecKeys key)
                                     { navigationStack->pressKey(key); },
                                     NUNCHUK_CLOCK, NUNCHUK_DATA);
 #endif
-#ifdef SEESAW_CLOCK
-  // TODO - this seems to hang the system
-  // AdafruitSeeSaw *seeSaw = new AdafruitSeeSaw([&](SpecKeys key, bool down)
-  //                                   { navigationStack->updateKey(key, down); },
-  //                                   [&](SpecKeys key)
-  //                                   { navigationStack->pressKey(key); });
-  // seeSaw->begin(SEESAW_DATA, SEESAW_CLOCK);
-#endif
-  SerialTransport *serialTransport = new SerialTransport();
-  PacketHandler *packetHandler = new PacketHandler(*serialTransport);
-  packetHandler->registerMessageHandler(new GetVersionMessageReciever(spiffsFiles, sdFiles, packetHandler), MessageId::GetVersionRequest);
-  packetHandler->registerMessageHandler(new ListFolderMessageReceiver(spiffsFiles, sdFiles, packetHandler), MessageId::ListFolderRequest);
-  packetHandler->registerMessageHandler(new WriteFileStartMessageReceiver(spiffsFiles, sdFiles, packetHandler), MessageId::WriteFileStartRequest);
-  packetHandler->registerMessageHandler(new WriteFileDataMessageReceiver(spiffsFiles, sdFiles, packetHandler), MessageId::WriteFileDataRequest);
-  packetHandler->registerMessageHandler(new WriteFileEndMessageReceiver(spiffsFiles, sdFiles, packetHandler), MessageId::WriteFileEndRequest);
-  packetHandler->registerMessageHandler(new ReadFileMessageReceiver(spiffsFiles, sdFiles, packetHandler), MessageId::ReadFileRequest);
-  packetHandler->registerMessageHandler(new DeleteFileMessageReceiver(spiffsFiles, sdFiles, packetHandler), MessageId::DeleteFileRequest);
-  packetHandler->registerMessageHandler(new MakeDirectoryMessageReceiver(spiffsFiles, sdFiles, packetHandler), MessageId::MakeDirectoryRequest);
-  packetHandler->registerMessageHandler(new RenameFileMessageReceiver(spiffsFiles, sdFiles, packetHandler), MessageId::RenameFileRequest);
-
-  xTaskCreatePinnedToCore(
-    SerialInterfaceTask,
-    "SerialInterface",
-    16384,
-    packetHandler,
-    1,
-    nullptr,
-    1
-  );
-
   Serial.println("Running on core: " + String(xPortGetCoreID()));
-  // use the boot pin to open the emulator menu
-  pinMode(0, INPUT_PULLUP);
   // just keep running
-  bool bootButtonWasPressed = false;
   while (true)
   {
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    if (digitalRead(0) == LOW)
-    {
-      navigationStack->updateKey(SPECKEY_MENU, true);
-      bootButtonWasPressed = true;
-    }
-    else if (bootButtonWasPressed)
-    {
-      navigationStack->updateKey(SPECKEY_MENU, false);
-      navigationStack->pressKey(SPECKEY_MENU);
-      bootButtonWasPressed = false;
-    }
+    //usbHost.task();
+    vTaskDelay(10000);
   }
 }
 
 unsigned long frame_millis;
 void loop()
 {
+  
 }

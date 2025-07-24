@@ -1,9 +1,10 @@
 #pragma once
 
 #include "Screen.h"
-#include "../TFT/Display.h"
-#include "fonts/GillSans_25_vlw.h"
-#include "NavigationStack.h"
+#include "../TFT/TFTDisplay.h"
+#include "fonts/GillSans_30_vlw.h"
+
+class TFTDisplay;
 
 class ErrorScreen : public Screen
 {
@@ -13,10 +14,8 @@ private:
 public:
   ErrorScreen(
       std::vector<std::string> messages,
-      Display &tft,
-      HDMIDisplay *hdmiDisplay,
-      AudioOutput *audioOutput,
-      IFiles *files) : m_messages(messages), Screen(tft, hdmiDisplay, audioOutput, files)
+      TFTDisplay &tft,
+      AudioOutput *audioOutput) : m_messages(messages), Screen(tft, audioOutput)
   {
   }
 
@@ -25,14 +24,17 @@ public:
     updateDisplay();
   }
   
-  void pressKey(SpecKeys key) override
+  void updatekey(SpecKeys key, uint8_t state)
   {
-    m_navigationStack->pop();
+    if (state == 1)
+    {
+        m_navigationStack->pop();
+    }
   }
 
   void updateDisplay()
   {
-    m_tft.loadFont(GillSans_25_vlw);
+    m_tft.loadFont(GillSans_30_vlw);
     m_tft.startWrite();
     m_tft.fillScreen(TFT_RED);
     m_tft.setTextColor(TFT_WHITE, TFT_RED);

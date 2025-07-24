@@ -2,12 +2,12 @@
 
 #include "Screen.h"
 #include "../TFT/TFTDisplay.h"
-#include "fonts/GillSans_25_vlw.h"
+#include "fonts/GillSans_30_vlw.h"
 #include "fonts/GillSans_15_vlw.h"
 #include "../Emulator/spectrum.h"
 #include "../Emulator/snaps.h"
 
-class IFiles;
+class TFTDisplay;
 
 class SaveSnapshotScreen : public Screen
 {
@@ -16,11 +16,9 @@ private:
   std::string filename = "";
 public:
   SaveSnapshotScreen(
-      Display &tft,
-      HDMIDisplay *hdmiDisplay,
+      TFTDisplay &tft,
       AudioOutput *audioOutput,
-      ZXSpectrum *machine,
-      IFiles *files) : machine(machine), Screen(tft, hdmiDisplay, audioOutput, files)
+      ZXSpectrum *machine) : machine(machine), Screen(tft, audioOutput)
   {
   }
 
@@ -38,9 +36,7 @@ public:
     if (filename.length() > 0) {
         auto bl = BusyLight();
         drawBusy();
-        std::string fname = m_files->getPath("/snapshots") + "/" + filename + ".Z80";
-        Z80FileWriter writer(machine, fname.c_str());
-        writer.saveZ80();
+        saveZ80(machine, ("/fs/snapshots/" + filename + ".Z80").c_str());
         playSuccessBeep();
         vTaskDelay(500 / portTICK_PERIOD_MS);
         m_navigationStack->pop();
@@ -96,7 +92,7 @@ public:
   {
     const int yMargin = 100;
     const int xMargin = 76;
-    m_tft.loadFont(GillSans_25_vlw);
+    m_tft.loadFont(GillSans_30_vlw);
     m_tft.startWrite();
     m_tft.fillRect(xMargin/2, yMargin/2, m_tft.width() - xMargin, m_tft.height() - yMargin, TFT_BLACK);
     m_tft.drawRect(xMargin/2, yMargin/2, m_tft.width() - xMargin, m_tft.height() - yMargin, TFT_WHITE);
