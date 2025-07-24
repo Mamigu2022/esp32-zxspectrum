@@ -64,9 +64,50 @@
 #define ILI9341_GMCTRP1 0xE0
 #define ILI9341_GMCTRN1 0xE1
 
-ILI9341::ILI9341(gpio_num_t cs, gpio_num_t dc, gpio_num_t rst, gpio_num_t bl, int width, int height)
-    : TFTDisplay(cs, dc, rst, bl, width, height)
+ILI9341::ILI9341(gpio_num_t mosi, gpio_num_t clk, gpio_num_t cs, gpio_num_t dc, gpio_num_t rst, gpio_num_t bl, int width, int height)
+    : TFTDisplay(mosi, clk, cs, dc, rst, bl, width, height)
 {
+    // Initialize SPI
+    spi_bus_config_t buscfg = {
+        .mosi_io_num = mosi,
+        .miso_io_num = -1,
+        .sclk_io_num = clk,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .data4_io_num = -1,
+        .data5_io_num = -1,
+        .data6_io_num = -1,
+        .data7_io_num = -1,
+        .max_transfer_sz = 65535,
+        .flags = SPICOMMON_BUSFLAG_MASTER,
+        //.isr_cpu_id = ESP_INTR_CPU_AFFINITY_1,
+        .intr_flags = 0,
+    };
+
+    spi_device_interface_config_t devcfg = {
+        .command_bits = 0,
+        .address_bits = 0,
+        .dummy_bits = 0,
+        .mode = 0, // SPI mode 0
+        //.clock_source = SPI_CLK_SRC_DEFAULT,                   // Use the same frequency as the APB bus
+        .duty_cycle_pos = 128,
+        .cs_ena_pretrans = 0,
+        .cs_ena_posttrans = 0,
+        .clock_speed_hz = SPI_MASTER_FREQ_20M, // Clock out at 80 MHz
+        .input_delay_ns = 0,
+        .spics_io_num = cs, // CS pin
+        .flags = SPI_DEVICE_NO_DUMMY,
+        .queue_size = 1,
+        .pre_cb = nullptr,
+        .post_cb = nullptr
+
+    };
+
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &devcfg, &spi));
+
+    spi_device_acquire_bus(spi, portMAX_DELAY);
+
     // Reset the display
     gpio_set_level(rst, 0);
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -84,7 +125,7 @@ ILI9341::ILI9341(gpio_num_t cs, gpio_num_t dc, gpio_num_t rst, gpio_num_t bl, in
     SEND_CMD_DATA(ILI9341_PWCTR2, 0x10);                                                                                      // Power control, SAP[2:0], BT[3:0]
     SEND_CMD_DATA(ILI9341_VMCTR1, 0x3E, 0x28);                                                                                // VCM control
     SEND_CMD_DATA(ILI9341_VMCTR2, 0x86);                                                                                      // VCM control2
-    SEND_CMD_DATA(ILI9341_MADCTL, TFT_MAD_MX | TFT_MAD_RGB);                                                    // Rotation 0 (portrait mode)
+    //SEND_CMD_DATA(ILI9341_MADCTL, TFT_MAD_MX | TFT_MAD_RGB);                                                    // Rotation 0 (portrait mode)
     SEND_CMD_DATA(ILI9341_PIXFMT, 0x55);                                                                                      // Pixel Format Set
     SEND_CMD_DATA(ILI9341_FRMCTR1, 0x00, 0x13);                                                                               // Frame Rate Control (100Hz)
     SEND_CMD_DATA(ILI9341_DFUNCTR, 0x08, 0x82, 0x27);                                                                         // Display Function Control
@@ -92,7 +133,7 @@ ILI9341::ILI9341(gpio_num_t cs, gpio_num_t dc, gpio_num_t rst, gpio_num_t bl, in
     SEND_CMD_DATA(ILI9341_GAMMASET, 0x01);                                                                                    // Gamma curve selected
     SEND_CMD_DATA(ILI9341_GMCTRP1, 0x0F, 0x31, 0x2B, 0x0C, 0x0E, 0x08, 0x4E, 0xF1, 0x37, 0x07, 0x10, 0x03, 0x0E, 0x09, 0x00); // Set Gamma
     SEND_CMD_DATA(ILI9341_GMCTRN1, 0x00, 0x0E, 0x14, 0x03, 0x11, 0x07, 0x31, 0xC1, 0x48, 0x08, 0x0F, 0x0C, 0x31, 0x36, 0x0F); // Set Gamma
-    SEND_CMD_DATA(TFT_MADCTL, TFT_MAD_ML | TFT_MAD_MV | TFT_MAD_BGR);
+    SEND_CMD_DATA(TFT_MADCTL, TFT_MAD_MX | TFT_MAD_MY | TFT_MAD_MV |TFT_MAD_BGR);
     SEND_CMD_DATA(0x11); // Exit Sleep
     delay(120);
     SEND_CMD_DATA(0x29); // Display on
