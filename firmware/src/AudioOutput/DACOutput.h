@@ -7,11 +7,10 @@
 /**
  * Base Class for both the ADC and I2S sampler
  **/
-class ISettings;
 class DACOutput : public I2SBase
 {
 public:
-    DACOutput(i2s_port_t i2s_port, ISettings *settings) : I2SBase(i2s_port, settings) {}
+    DACOutput(i2s_port_t i2s_port) : I2SBase(i2s_port) {}
     void start(uint32_t sample_rate);
     virtual int16_t process_sample(int16_t sample)
     {

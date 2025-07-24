@@ -14,7 +14,7 @@ void BuzzerOutput::start(uint32_t sample_rate)
 {
   mSampleRate = sample_rate;
   // pinMode(mBuzzerPin, OUTPUT);
-  ledcSetup(0, 50000, 9);
+  ledcSetup(0, 100000, 8);
   ledcAttachPin(mBuzzerPin, 0);
   // create a timer that will fire at the sample rate
   timer_config_t timer_config = {
@@ -34,7 +34,6 @@ void BuzzerOutput::start(uint32_t sample_rate)
 
 void BuzzerOutput::pause()
 {
-  ledcWrite(0, 0);
   timer_pause(TIMER_GROUP_0, TIMER_0);
 }
 
@@ -72,36 +71,25 @@ void BuzzerOutput::write(const uint8_t *samples, int count)
 
 bool IRAM_ATTR BuzzerOutput::onTimer()
 {
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
   // output a sample from the buffer if we have one
   if (mCurrentIndex < mBufferLength)
   {
-    // uint16_t micSample = adc1_get_raw(ADC1_CHANNEL_4);
-    // micAve = (micAve * 99 + micSample) / 100;
-    // uint8_t micValue = micSample > (micAve * 1001)/1000 ? 1 : 0;
-    uint8_t micValue = 0;
-    xQueueSendFromISR(micValueQueue, &micValue, &xHigherPriorityTaskWoken);
     mCount++;
     // get the first sample from the buffer - shift it up to 9 bits for max resolution
     uint16_t sample = mBuffer[mCurrentIndex];
-    if (micValue)
-    {
-      sample = std::min(255, sample + 50);
-    }
-    // go up to 9 bits resolution
-    sample = sample << 1;
     sample = sample * mVolume / 10;
-    // limit to 70% of the max volume - our speaker is 8ohm, 2W
-    // 5 volts * 0.7 = 3.5 volts
+    // limit to 80% of the max volume - our speaker is 8ohm, 2W
+    // 5 volts * 0.8 = 4 volts
     // P = V^2 / R
-    // 3.5^2 / 8 = 1.2W
-    sample = sample * 70 / 100;
+    // 4^2 / 8 = 2W
+    sample = sample * 80 / 100;
     mCurrentIndex++;
     ledcWrite(0, sample);
   }
   if(mCurrentIndex >= mBufferLength)
   {
     // do we have any data in teh second buffer?
+    BaseType_t xHigherPriorityTaskWoken;
     if (xSemaphoreTakeFromISR(mBufferSemaphore, &xHigherPriorityTaskWoken) == pdTRUE)
     {
       if (mSecondBufferLength > 0) {
