@@ -1,16 +1,12 @@
 #ifndef SPECTRUM_H
 #define SPECTRUM_H
 
-#include <stdint.h>
-#include <stdlib.h>
 #include "z80/z80.h"
 #include "keyboard_defs.h"
 #include <string.h>
 #include "../AYSound/AySound.h"
 
 extern uint8_t speckey[8];
-
-extern const uint16_t specpal565[16];
 
 enum models_enum
 {
@@ -58,39 +54,29 @@ typedef struct
   uint8_t SoundBits;
 } tipo_hwopt;
 
-class MemoryPage {
-public:
-  bool isDirty;
-  uint8_t *data;
-  MemoryPage() {
-    isDirty = false;
-    data = (uint8_t *) malloc(0x4000);
-    memset(data, 0, 0x4000);
-  }
-};
-
 class Memory {
   public:
     uint8_t hwBank = 0;
-    MemoryPage *rom[2] = {0};
-    MemoryPage *banks[8] = {0};
-    // track is a memory bank is dirty
-    MemoryPage *currentScreen;
-    MemoryPage *mappedMemory[4];
+    uint8_t *rom[2];
+    uint8_t *banks[8];
+    uint8_t *currentScreen;
+    uint8_t *mappedMemory[4];
     Memory() {
       // allocate space for the rom
       for (int i = 0; i < 2; i++) {
-        rom[i] = new MemoryPage();
-        if (rom[i] == nullptr || rom[i]->data == nullptr) {
+        rom[i] = (uint8_t *)malloc(0x4000);
+        if (rom[i] == 0) {
           printf("Failed to allocate ROM");
         }
+        memset(rom[i], 0, 0x4000);
       }
       // allocate space for the memory banks
       for (int i = 0; i < 8; i++) {
-        banks[i] = new MemoryPage();
-        if (banks[i] == nullptr || banks[i]->data == nullptr) {
+        banks[i] = (uint8_t *)malloc(0x4000);
+        if (banks[i] == 0) {
           printf("Failed to allocate RAM");
         }
+        memset(banks[i], 0, 0x4000);
       }
       // wire up the default memory configuration - this will work for the 48k model and is the default for the 128k model
       mappedMemory[0] = rom[0];
@@ -116,7 +102,7 @@ class Memory {
     inline uint8_t peek(int address) {
       int memoryBank = address >> 14;
       int bankAddress = address & 0x3fff;
-      return mappedMemory[memoryBank]->data[bankAddress];
+      return mappedMemory[memoryBank][bankAddress];
     }
     inline void poke(int address, uint8_t value) {
       int memoryBank = address >> 14;
@@ -124,8 +110,7 @@ class Memory {
       if (memoryBank == 0) {
         // ignore writes to rom
       } else {
-        mappedMemory[memoryBank]->data[bankAddress] = value;
-        mappedMemory[memoryBank]->isDirty = true;
+        mappedMemory[memoryBank][bankAddress] = value;
       }
     }
     void loadRom(const uint8_t *rom_data, int rom_len) {
@@ -133,7 +118,7 @@ class Memory {
       int romCount = rom_len / 0x4000;
       for (int i = 0; i < romCount; i++) {
         printf("Copying ROM %d\n", i);
-        memcpy(rom[i]->data, rom_data + (i * 0x4000), 0x4000);
+        memcpy(rom[i], rom_data + (i * 0x4000), 0x4000);
       }
     }
 };
@@ -149,20 +134,17 @@ public:
   uint8_t kempston_port = 0x0;
   uint8_t ulaport_FF = 0xFF;
   bool micLevel = false;
-  uint8_t borderColors[312] = {0};
-  // indicates that the ROM loading routine is active
-  bool romLoadingRoutineHit = false;
 
   ZXSpectrum();
   void reset();
   int runForFrame(AudioOutput *audioOutput, FILE *audioFile);
-  inline int runForCycles(int cycles)
+  inline void runForCycles(int cycles)
   {
-    return Z80Run(z80Regs, cycles);
+    Z80Run(z80Regs, cycles);
   }
 
   void interrupt();
-  void updateKey(SpecKeys key, uint8_t state);
+  void updatekey(SpecKeys key, uint8_t state);
 
   inline uint8_t z80_peek(uint16_t address)
   {
@@ -265,10 +247,6 @@ inline void z80_out(uint16_t port, uint8_t data)
     } else {
       micLevel = true;
     }
-  }
-
-  inline void setMicValue(bool value) {
-    micLevel = value;
   }
 
   inline void setMicLow() {

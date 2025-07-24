@@ -14,21 +14,13 @@
  *
  *======================================================================
  */
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-#endif
-#include <stdio.h>
+#include "Arduino.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include "../AudioOutput/AudioOutput.h"
 #include "spectrum.h"
 #include "48k_rom.h"
 #include "128k_rom.h"
-
-const uint16_t specpal565[16] = {
-    0x0000, 0x1B00, 0x00B8, 0x17B8, 0xE005, 0xF705, 0xE0BD, 0x18C6, 0x0000, 0x1F00, 0x00F8, 0x1FF8, 0xE007, 0xFF07, 0xE0FF, 0xFFFF
-};
-
 
 // Con estas variables se controla el mapeado de las teclas virtuales del spectrum a I/O port
 const int key2specy[2][41] = {
@@ -60,15 +52,12 @@ void ZXSpectrum::reset()
 int ZXSpectrum::runForFrame(AudioOutput *audioOutput, FILE *audioFile)
 {
   uint8_t audioBuffer[312];
-  uint8_t *attrBase = mem.currentScreen->data + 0x1800;
+  uint8_t *attrBase = mem.currentScreen + 0x1800;
   int c = 0;
   // Each line should be 224 tstates long...
   // And a complete frame is (64+192+56)*224=69888 tstates long
   for (int i = 0; i < 312; i++)
   {
-    if (audioOutput) {
-      setMicValue(audioOutput->getMicValue());
-    }
     // handle port FF for the border - is this actually doing anything useful?
     if (i < 64 || i >= 192 + 64)
     {
@@ -82,9 +71,15 @@ int ZXSpectrum::runForFrame(AudioOutput *audioOutput, FILE *audioFile)
     }
     // run for 224 cycles
     c += 224;
-    uint16_t speakerValue = runForCycles(224);
-    borderColors[i] = hwopt.BorderColor & 0b00000111;
-    audioBuffer[i] = speakerValue/4;
+    runForCycles(224);
+    if (hwopt.SoundBits != 0)
+    {
+      audioBuffer[i] = 0xFF;
+    }
+    else
+    {
+      audioBuffer[i] = 0;
+    }
   }
   interrupt();
 
@@ -101,6 +96,9 @@ int ZXSpectrum::runForFrame(AudioOutput *audioOutput, FILE *audioFile)
   }
   if (audioFile != NULL) {
     fwrite(audioBuffer, 1, 312, audioFile);
+    //fwrite(AySound::SamplebufAY, 1, 312, audioFile);
+  }
+  if (audioFile != NULL) {
     fflush(audioFile);
   }
   // write the audio buffer to the I2S device - this will block if the buffer is full which will control our frame rate 312/15.6KHz = 1/50th of a second
@@ -116,7 +114,7 @@ void ZXSpectrum::interrupt()
   Z80Interrupt(z80Regs, 0x38);
 }
 
-void ZXSpectrum::updateKey(SpecKeys key, uint8_t state)
+void ZXSpectrum::updatekey(SpecKeys key, uint8_t state)
 {
   // Bit pattern: XXXFULDR
   switch (key)
@@ -152,11 +150,16 @@ void ZXSpectrum::updateKey(SpecKeys key, uint8_t state)
       kempston_port &= 0b11101111;
     break;
   default:
-    if (key < SPECKEY_MAX_NORMAL) {
-      if (state == 1)
-        speckey[key2specy[0][key]] &= key2specy[1][key];
-      else
-        speckey[key2specy[0][key]] |= ((key2specy[1][key]) ^ 0xFF);
+    if (state == 1)
+    {
+      speckey[key2specy[0][key]] &= key2specy[1][key];
+     //Serial.print(key2specy[0][key]);
+     //Serial.println("pulsado");
+      }
+    else{
+      speckey[key2specy[0][key]] |= ((key2specy[1][key]) ^ 0xFF);
+      //Serial.print(key2specy[0][key]);
+      //Serial.println("sinpulsar");
     }
     break;
   }
