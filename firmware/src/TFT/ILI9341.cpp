@@ -92,7 +92,7 @@ ILI9341::ILI9341(gpio_num_t cs, gpio_num_t dc, gpio_num_t rst, gpio_num_t bl, in
     SEND_CMD_DATA(ILI9341_GAMMASET, 0x01);                                                                                    // Gamma curve selected
     SEND_CMD_DATA(ILI9341_GMCTRP1, 0x0F, 0x31, 0x2B, 0x0C, 0x0E, 0x08, 0x4E, 0xF1, 0x37, 0x07, 0x10, 0x03, 0x0E, 0x09, 0x00); // Set Gamma
     SEND_CMD_DATA(ILI9341_GMCTRN1, 0x00, 0x0E, 0x14, 0x03, 0x11, 0x07, 0x31, 0xC1, 0x48, 0x08, 0x0F, 0x0C, 0x31, 0x36, 0x0F); // Set Gamma
-    SEND_CMD_DATA(TFT_MADCTL, TFT_MAD_ML | TFT_MAD_MV | TFT_MAD_BGR);
+    SEND_CMD_DATA(TFT_MADCTL, TFT_MAD_MX | TFT_MAD_MY | TFT_MAD_MV |TFT_MAD_BGR);
     SEND_CMD_DATA(0x11); // Exit Sleep
     delay(120);
     SEND_CMD_DATA(0x29); // Display on

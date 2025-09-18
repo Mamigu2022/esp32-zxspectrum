@@ -42,6 +42,9 @@
 #ifdef TOUCH_KEYBOARD_V2
 #include "Input/TouchKeyboardV2.h"
 #endif
+#ifdef TECLADO_USB
+#include "Input/USBKeyboard.h"
+#endif
 #include "SerialInterface/PacketHandler.h"
 #include "SerialInterface/SerialTransport.h"
 #include "SerialInterface/Messages/GetVersion.h"
@@ -51,7 +54,13 @@
 #include "SerialInterface/Messages/DeleteFile.h"
 #include "SerialInterface/Messages/MakeDirectory.h"
 #include "SerialInterface/Messages/RenameFile.h"
-
+#ifdef KEYBOARD_BUTTON
+#include "Input/Keyboardbutton.h"
+ const uint8_t ROW_PINS[8] = {46, 1, 42, 41, 2, 13, 39, 40};    // Filas
+ const uint8_t COL_PINS[5] = {45, 38, 48, 21, 47};            // Columnas
+//const uint8_t ROW_PINS[8] = {18, 17, 16, 15, 7, 6, 5, 4};    // Filas
+//const uint8_t COL_PINS[5] = {46, 13, 12, 11, 10};          
+#endif
 void SerialInterfaceTask(void *arg) {
   PacketHandler *packetHandler = (PacketHandler *) arg;
   while(true) {
@@ -212,6 +221,36 @@ void setup(void)
                                     { navigationStack->pressKey(key); },
                                     NUNCHUK_CLOCK, NUNCHUK_DATA);
 #endif
+#ifdef TECLADO_USB
+USBKeyboard *usbkeyboard = new USBKeyboard([&](SpecKeys key, bool down)
+                                    { navigationStack->updateKey(key, down);
+                                    if (down) { navigationStack->pressKey(key); } },
+                                    [&](SpecKeys key)
+                                    { navigationStack->pressKey(key); });
+ #endif           
+#ifdef KEYBOARD_BUTTON
+   Serial.println("tecla");
+   //adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
+   //adc1_config_channel_atten(ADC1_CHANNEL_5, ADC_ATTEN_DB_11);
+   pinMode(6,INPUT);
+   pinMode(5,INPUT);
+   pinMode(4,INPUT_PULLUP);
+for (int i = 0; i < 8; i++) {
+    
+    pinMode(ROW_PINS[i], OUTPUT);
+    digitalWrite(ROW_PINS[i], HIGH); // Inicialmente desactivadas
+  }
+  // Configura los pines de columnas como INPUT_PULLUP
+  for (int j = 0; j < 5; j++) {
+    pinMode(COL_PINS[j], INPUT_PULLUP);
+  }
+  Keyboardbutton *keyboardbutton = new Keyboardbutton([&](SpecKeys key, bool down)
+                                    { navigationStack->updateKey(key, down);
+                                    if (down) { navigationStack->pressKey(key); } },
+                                    [&](SpecKeys key)
+                                    { navigationStack->pressKey(key); });
+  //Keyboardbutton->start();
+#endif        
 #ifdef SEESAW_CLOCK
   // TODO - this seems to hang the system
   // AdafruitSeeSaw *seeSaw = new AdafruitSeeSaw([&](SpecKeys key, bool down)
