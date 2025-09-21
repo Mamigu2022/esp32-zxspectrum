@@ -82,10 +82,10 @@ while (true){
   else {keyboard->m_keyEvent(JOYK_LEFT,false);} 
   if ((leerjoyx<4000)&&(leerjoyx>1500)){keyboard->m_keyEvent(JOYK_RIGHT,true);}
   else {keyboard->m_keyEvent(JOYK_RIGHT,false);}  
- if (leerjoyy>4000){keyboard->m_keyEvent(JOYK_UP,true);keyboard->m_keyEvent(SPECKEY_7,true);}
-  else {keyboard->m_keyEvent(JOYK_UP,false);keyboard->m_keyEvent(SPECKEY_7,false);}
-  if ((leerjoyy<4000)&&(leerjoyy>1500)){keyboard->m_keyEvent(JOYK_DOWN,true);keyboard->m_keyEvent(SPECKEY_6,true);}
-  else {keyboard->m_keyEvent(JOYK_DOWN,false);keyboard->m_keyEvent(SPECKEY_6,false);}  
+ if (leerjoyy>4000){keyboard->m_keyEvent(JOYK_UP,true);}
+  else {keyboard->m_keyEvent(JOYK_UP,false);}
+  if ((leerjoyy<4000)&&(leerjoyy>1500)){keyboard->m_keyEvent(JOYK_DOWN,true);}
+  else {keyboard->m_keyEvent(JOYK_DOWN,false);}  
   if (digitalRead(4)==0 ){keyboard->m_keyEvent(JOYK_FIRE,true); }
   else{keyboard->m_keyEvent(JOYK_FIRE,false);}
 
@@ -96,3 +96,4 @@ while (true){
 vTaskDelay(1/ portTICK_PERIOD_MS); 
 }
 }
+
