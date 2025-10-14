@@ -24,7 +24,9 @@ class MyEspUsbHost : public EspUsbHost {
    //reporte[4]=report.keycode[4];
    //reporte[5]=report.keycode[5];
    
-   if(report.modifier){reporte[1]=57;}
+   if(report.modifier==2){reporte[1]=57;}
+   if(report.modifier==64){reporte[1]=43;}
+   if(last_report.modifier==66){reporte[0]=43;reporte[1]=57;}
 
   }
 };
@@ -199,6 +201,7 @@ void USBKeyboard::usbkeyboardTask(void *pParam)
   usbHost.task();
    }
  }
+
 
 
 
